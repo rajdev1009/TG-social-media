@@ -122,6 +122,12 @@ async function initPostgres() {
   // 3. Ensure Unique Constraint on telegram_id (Fixes the 42P10 ON CONFLICT error)
   try {
     await pgPool.query(`ALTER TABLE users ADD CONSTRAINT users_telegram_id_unique UNIQUE (telegram_id);`);
+  } catch (e) {}
+  
+
+  // 3. Ensure Unique Constraint on telegram_id (Fixes the 42P10 ON CONFLICT error)
+  try {
+    await pgPool.query(`ALTER TABLE users ADD CONSTRAINT users_telegram_id_unique UNIQUE (telegram_id);`);
   } catch (e) {
     // Ignore if constraint already exists
   }
@@ -248,7 +254,6 @@ async function initPostgres() {
 }
 
 
-  // 3. Reactions & Follows tables and indexes
   await pgPool.query(`
     CREATE TABLE IF NOT EXISTS reactions (
       id            BIGSERIAL PRIMARY KEY,
