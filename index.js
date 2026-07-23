@@ -67,52 +67,96 @@ const pgPool = new Pool({
 });
 pgPool.on('error', (err) => console.error('PG pool error:', err));
 
-const SCHEMA_SQL = `
-CREATE TABLE IF NOT EXISTS users (
-  id                     BIGSERIAL PRIMARY KEY,
-  telegram_id            BIGINT UNIQUE NOT NULL,
-  telegram_username      VARCHAR(64),
-  first_name             VARCHAR(128),
-  username               VARCHAR(32) UNIQUE,
-  bio                    TEXT DEFAULT '',
-  avatar_file_id         TEXT,
-  avatar_channel_msg_id  BIGINT,
-  like_count             INT DEFAULT 0,
-  dislike_count          INT DEFAULT 0,
-  follower_count         INT DEFAULT 0,
-  following_count        INT DEFAULT 0,
-  is_banned              BOOLEAN DEFAULT FALSE,
-  ban_reason             TEXT,
-  is_admin               BOOLEAN DEFAULT FALSE,
-  reg_step               VARCHAR(32) DEFAULT 'ask_username',
-  created_at             TIMESTAMPTZ DEFAULT NOW(),
-  last_active            TIMESTAMPTZ DEFAULT NOW()
-);
+async function initPostgres() {
+  // 1. Create table if it doesn't exist at all
+  await pgPool.query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id                     BIGSERIAL PRIMARY KEY,
+      telegram_id            BIGINT UNIQUE,
+      telegram_username      VARCHAR(64),
+      first_name             VARCHAR(128),
+      username               VARCHAR(32) UNIQUE,
+      bio                    TEXT DEFAULT '',
+      avatar_file_id         TEXT,
+      avatar_channel_msg_id  BIGINT,
+      like_count             INT DEFAULT 0,
+      dislike_count          INT DEFAULT 0,
+      follower_count         INT DEFAULT 0,
+      following_count        INT DEFAULT 0,
+      is_banned              BOOLEAN DEFAULT FALSE,
+      ban_reason             TEXT,
+      is_admin               BOOLEAN DEFAULT FALSE,
+      reg_step               VARCHAR(32) DEFAULT 'ask_username',
+      created_at             TIMESTAMPTZ DEFAULT NOW(),
+      last_active            TIMESTAMPTZ DEFAULT NOW()
+    );
+  `);
 
-CREATE TABLE IF NOT EXISTS reactions (
-  id            BIGSERIAL PRIMARY KEY,
-  actor_id      BIGINT REFERENCES users(id) ON DELETE CASCADE,
-  target_id     BIGINT REFERENCES users(id) ON DELETE CASCADE,
-  reaction_type VARCHAR(8) CHECK (reaction_type IN ('like','dislike')),
-  created_at    TIMESTAMPTZ DEFAULT NOW(),
-  UNIQUE(actor_id, target_id)
-);
+  // 2. Safety migrations: Add missing columns if table already existed
+  const columnsToAdd = [
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS telegram_id BIGINT;",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS telegram_username VARCHAR(64);",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS first_name VARCHAR(128);",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS username VARCHAR(32);",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS bio TEXT DEFAULT '';",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_file_id TEXT;",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_channel_msg_id BIGINT;",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS like_count INT DEFAULT 0;",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS dislike_count INT DEFAULT 0;",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS follower_count INT DEFAULT 0;",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS following_count INT DEFAULT 0;",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_banned BOOLEAN DEFAULT FALSE;",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS ban_reason TEXT;",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT FALSE;",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS reg_step VARCHAR(32) DEFAULT 'ask_username';",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_active TIMESTAMPTZ DEFAULT NOW();"
+  ];
 
-CREATE TABLE IF NOT EXISTS follows (
-  id            BIGSERIAL PRIMARY KEY,
-  follower_id   BIGINT REFERENCES users(id) ON DELETE CASCADE,
-  following_id  BIGINT REFERENCES users(id) ON DELETE CASCADE,
-  created_at    TIMESTAMPTZ DEFAULT NOW(),
-  UNIQUE(follower_id, following_id)
-);
+  for (const query of columnsToAdd) {
+    try {
+      await pgPool.query(query);
+    } catch (e) {}
+  }
 
-CREATE INDEX IF NOT EXISTS idx_users_telegram_id ON users(telegram_id);
-CREATE INDEX IF NOT EXISTS idx_users_username     ON users(username);
-CREATE INDEX IF NOT EXISTS idx_reactions_target    ON reactions(target_id);
-CREATE INDEX IF NOT EXISTS idx_reactions_actor      ON reactions(actor_id);
-CREATE INDEX IF NOT EXISTS idx_follows_following    ON follows(following_id);
-CREATE INDEX IF NOT EXISTS idx_follows_follower      ON follows(follower_id);
-`;
+  // 3. Ensure Unique Constraint on telegram_id (Fixes the 42P10 ON CONFLICT error)
+  try {
+    await pgPool.query(`ALTER TABLE users ADD CONSTRAINT users_telegram_id_unique UNIQUE (telegram_id);`);
+  } catch (e) {
+    // Ignore if constraint already exists
+  }
+
+  // 4. Reactions & Follows tables and indexes
+  await pgPool.query(`
+    CREATE TABLE IF NOT EXISTS reactions (
+      id            BIGSERIAL PRIMARY KEY,
+      actor_id      BIGINT REFERENCES users(id) ON DELETE CASCADE,
+      target_id     BIGINT REFERENCES users(id) ON DELETE CASCADE,
+      reaction_type VARCHAR(8) CHECK (reaction_type IN ('like','dislike')),
+      created_at    TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(actor_id, target_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS follows (
+      id            BIGSERIAL PRIMARY KEY,
+      follower_id   BIGINT REFERENCES users(id) ON DELETE CASCADE,
+      following_id  BIGINT REFERENCES users(id) ON DELETE CASCADE,
+      created_at    TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(follower_id, following_id)
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_users_telegram_id ON users(telegram_id);
+    CREATE INDEX IF NOT EXISTS idx_users_username     ON users(username);
+    CREATE INDEX IF NOT EXISTS idx_reactions_target    ON reactions(target_id);
+    CREATE INDEX IF NOT EXISTS idx_reactions_actor      ON reactions(actor_id);
+    CREATE INDEX IF NOT EXISTS idx_follows_following    ON follows(following_id);
+    CREATE INDEX IF NOT EXISTS idx_follows_follower      ON follows(follower_id);
+  `);
+
+  console.log('✅ Postgres (Neon) schema and columns ensured');
+}
+
+// ---- Postgres query helpers ----
 
 async function initPostgres() {
   // 1. Create table if it doesn't exist at all
