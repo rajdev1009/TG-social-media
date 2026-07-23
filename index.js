@@ -139,7 +139,7 @@ async function initPostgres() {
     );
   `);
 
-  // 2. Safety migrations: Agar table pehle se bani ho aur columns missing hon, toh add kar de
+  // 2. Safety migrations: Add missing columns if table already existed
   const columnsToAdd = [
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS telegram_id BIGINT;",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS telegram_username VARCHAR(64);",
@@ -163,10 +163,46 @@ async function initPostgres() {
   for (const query of columnsToAdd) {
     try {
       await pgPool.query(query);
-    } catch (e) {
-      // Ignore minor duplicate/conflict errors if column already exists
-    }
+    } catch (e) {}
   }
+
+  // 3. Ensure Unique Constraint on telegram_id (Fixes the 42P10 ON CONFLICT error)
+  try {
+    await pgPool.query(`ALTER TABLE users ADD CONSTRAINT users_telegram_id_unique UNIQUE (telegram_id);`);
+  } catch (e) {
+    // Ignore if constraint already exists
+  }
+
+  // 4. Reactions & Follows tables and indexes
+  await pgPool.query(`
+    CREATE TABLE IF NOT EXISTS reactions (
+      id            BIGSERIAL PRIMARY KEY,
+      actor_id      BIGINT REFERENCES users(id) ON DELETE CASCADE,
+      target_id     BIGINT REFERENCES users(id) ON DELETE CASCADE,
+      reaction_type VARCHAR(8) CHECK (reaction_type IN ('like','dislike')),
+      created_at    TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(actor_id, target_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS follows (
+      id            BIGSERIAL PRIMARY KEY,
+      follower_id   BIGINT REFERENCES users(id) ON DELETE CASCADE,
+      following_id  BIGINT REFERENCES users(id) ON DELETE CASCADE,
+      created_at    TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(follower_id, following_id)
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_users_telegram_id ON users(telegram_id);
+    CREATE INDEX IF NOT EXISTS idx_users_username     ON users(username);
+    CREATE INDEX IF NOT EXISTS idx_reactions_target    ON reactions(target_id);
+    CREATE INDEX IF NOT EXISTS idx_reactions_actor      ON reactions(actor_id);
+    CREATE INDEX IF NOT EXISTS idx_follows_following    ON follows(following_id);
+    CREATE INDEX IF NOT EXISTS idx_follows_follower      ON follows(follower_id);
+  `);
+
+  console.log('✅ Postgres (Neon) schema and columns ensured');
+}
+
 
   // 3. Reactions & Follows tables and indexes
   await pgPool.query(`
