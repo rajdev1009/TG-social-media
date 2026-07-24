@@ -1,0 +1,22 @@
+{
+  "name": "echo-social",
+  "version": "1.0.0",
+  "description": "Instagram-style social app using Telegram multi-bot channels as a free CDN, with Neon Postgres + MongoDB — flat single-file structure",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "telegraf": "^4.16.3",
+    "pg": "^8.11.5",
+    "mongoose": "^8.5.1",
+    "dotenv": "^16.4.5",
+    "bcryptjs": "^2.4.3",
+    "cookie-parser": "^1.4.6",
+    "multer": "^1.4.5-lts.1"
+  }
+}
