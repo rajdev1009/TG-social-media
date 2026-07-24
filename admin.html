@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ECHO — Admin</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        fontFamily: { display: ['"Space Grotesk"', 'sans-serif'], body: ['Inter', 'sans-serif'] },
+        colors: { void:'#0A0B10', panel:'#14161F', panel2:'#1C1F2B', hairline:'#262A38', ink:'#EDEFF7', mute:'#8A8FA3', pulse:'#FF2E7E', signal:'#00E8FF' },
+      },
+    },
+  };
+</script>
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+
+<style>
+  body{ font-family:'Inter',sans-serif; background:#0A0B10; color:#EDEFF7; }
+  .font-display{ font-family:'Space Grotesk',sans-serif; }
+  .card{ background:#14161F; border:1px solid #262A38; border-radius:16px; }
+  .no-scrollbar::-webkit-scrollbar{ display:none; }
+  .no-scrollbar{ -ms-overflow-style:none; scrollbar-width:none; }
+  .pill{ font-size:11px; padding:2px 8px; border-radius:9999px; font-weight:600; }
+  input, textarea{ background:#1C1F2B; border:1px solid #262A38; color:#EDEFF7; }
+  ::placeholder{ color:#5C6178; }
+  .spinner{ width:20px; height:20px; border-radius:9999px; border:2.5px solid #33384A; border-top-color:#FF2E7E; animation: spin 0.7s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body class="min-h-screen">
+
+<!-- GATE -->
+<div id="gate" class="min-h-screen flex items-center justify-center px-6 text-center">
+  <div>
+    <div class="spinner mx-auto mb-3"></div>
+    <p class="text-sm text-mute" id="gate-message">Checking admin access…</p>
+  </div>
+</div>
+
+<!-- DASHBOARD -->
+<div id="dashboard" class="hidden max-w-5xl mx-auto px-4 sm:px-6 py-6">
+
+  <header class="flex items-center justify-between mb-6">
+    <div class="flex items-center gap-2">
+      <i data-lucide="shield" class="w-6 h-6" style="color:#FF2E7E"></i>
+      <span class="font-display font-bold text-xl">ECHO Admin</span>
+    </div>
+    <a href="/index.html" class="text-sm text-mute hover:text-white flex items-center gap-1"><i data-lucide="arrow-left" class="w-4 h-4"></i> Back to app</a>
+  </header>
+
+  <!-- STATS -->
+  <section class="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-8" id="stats-grid"></section>
+
+  <!-- TABS -->
+  <div class="flex gap-2 mb-5 overflow-x-auto no-scrollbar">
+    <button data-tab="users" onclick="switchTab('users')" class="tab-btn px-4 py-2 rounded-xl text-sm font-medium shrink-0">Users</button>
+    <button data-tab="reports" onclick="switchTab('reports')" class="tab-btn px-4 py-2 rounded-xl text-sm font-medium shrink-0">Reports</button>
+    <button data-tab="broadcast" onclick="switchTab('broadcast')" class="tab-btn px-4 py-2 rounded-xl text-sm font-medium shrink-0">Broadcast</button>
+    <button data-tab="inspect" onclick="switchTab('inspect')" class="tab-btn px-4 py-2 rounded-xl text-sm font-medium shrink-0">Inspect chat</button>
+  </div>
+
+  <!-- USERS -->
+  <section id="tab-users" class="card p-4">
+    <div class="flex items-center gap-2 mb-4">
+      <i data-lucide="search" class="w-4 h-4 text-mute"></i>
+      <input id="user-search" oninput="loadUsers(this.value)" placeholder="Search username…" class="flex-1 rounded-lg px-3 py-2 text-sm outline-none">
+    </div>
+    <div id="users-list" class="divide-y divide-hairline"></div>
+  </section>
+
+  <!-- REPORTS -->
+  <section id="tab-reports" class="card p-4 hidden">
+    <div id="reports-list" class="space-y-3"></div>
+  </section>
+
+  <!-- BROADCAST -->
+  <section id="tab-broadcast" class="card p-5 hidden">
+    <p class="text-sm text-mute mb-3">Sends a Telegram DM to every linked, non-banned user.</p>
+    <textarea id="broadcast-text" rows="4" placeholder="Write your announcement…" class="w-full rounded-xl p-3 text-sm outline-none"></textarea>
+    <button onclick="sendBroadcast()" id="broadcast-btn" class="mt-3 px-5 py-2.5 rounded-xl text-sm font-medium text-white" style="background:linear-gradient(135deg,#FF2E7E,#7A2EFF,#00E8FF);">Send broadcast</button>
+    <p id="broadcast-status" class="mt-2 text-sm text-mute"></p>
+  </section>
+
+  <!-- INSPECT CHAT -->
+  <section id="tab-inspect" class="card p-5 hidden">
+    <p class="text-sm text-mute mb-3">Pulls the DM history between two usernames — for safety and moderation review only.</p>
+    <div class="flex gap-2 mb-3">
+      <input id="inspect-user1" placeholder="username 1" class="flex-1 rounded-lg px-3 py-2 text-sm outline-none">
+      <input id="inspect-user2" placeholder="username 2" class="flex-1 rounded-lg px-3 py-2 text-sm outline-none">
+      <button onclick="inspectChat()" class="px-4 py-2 rounded-lg text-sm font-medium text-white" style="background:#FF2E7E;">Pull</button>
+    </div>
+    <div id="inspect-results" class="space-y-2 max-h-96 overflow-y-auto no-scrollbar"></div>
+  </section>
+
+</div>
+
+<script>
+lucide.createIcons();
+
+async function api(path, opts = {}) {
+  const res = await fetch(path, { credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, ...opts });
+  if (!res.ok) { const e = await res.json().catch(() => ({ error: 'Request failed' })); throw new Error(e.error || 'Request failed'); }
+  return res.json();
+}
+function timeAgo(iso) {
+  if (!iso) return '';
+  const s = Math.floor((Date.now() - new Date(iso)) / 1000);
+  if (s < 60) return 'now'; if (s < 3600) return Math.floor(s/60)+'m'; if (s < 86400) return Math.floor(s/3600)+'h';
+  return Math.floor(s/86400)+'d';
+}
+
+async function boot() {
+  try {
+    await api('/api/admin/stats');
+    document.getElementById('gate').classList.add('hidden');
+    document.getElementById('dashboard').classList.remove('hidden');
+    loadStats(); switchTab('users'); loadUsers('');
+  } catch (err) {
+    document.getElementById('gate-message').textContent =
+      err.message === 'Not authenticated'
+        ? 'Please log in from the main app first, then reopen this page.'
+        : 'Admins only — this account does not have dashboard access.';
+    document.querySelector('.spinner').classList.add('hidden');
+  }
+}
+
+async function loadStats() {
+  const s = await api('/api/admin/stats');
+  const items = [
+    ['Users', s.users, 'users'],
+    ['Posts', s.posts, 'image'],
+    ['Active stories', s.activeStories, 'zap'],
+    ['Open reports', s.openReports, 'flag'],
+    ['Bot pool', s.botPoolSize, 'radio'],
+  ];
+  document.getElementById('stats-grid').innerHTML = items.map(([label, val, icon]) => `
+    <div class="card p-4">
+      <i data-lucide="${icon}" class="w-4 h-4 mb-2" style="color:#00E8FF"></i>
+      <p class="font-display font-bold text-2xl">${val}</p>
+      <p class="text-xs text-mute">${label}</p>
+    </div>`).join('');
+  lucide.createIcons();
+}
+
+function switchTab(name) {
+  ['users','reports','broadcast','inspect'].forEach(t => document.getElementById('tab-'+t).classList.toggle('hidden', t !== name));
+  document.querySelectorAll('.tab-btn').forEach(b => {
+    const active = b.dataset.tab === name;
+    b.style.background = active ? '#FF2E7E' : '#14161F';
+    b.style.color = active ? '#fff' : '#8A8FA3';
+  });
+  if (name === 'reports') loadReports();
+}
+
+let userSearchDebounce;
+function loadUsers(q) {
+  clearTimeout(userSearchDebounce);
+  userSearchDebounce = setTimeout(async () => {
+    const users = await api(`/api/admin/users?q=${encodeURIComponent(q || '')}`);
+    document.getElementById('users-list').innerHTML = users.length ? users.map(u => `
+      <div class="flex items-center gap-3 py-3">
+        <div class="flex-1 min-w-0">
+          <p class="text-sm font-medium truncate">${u.username} ${u.is_admin ? '<span class="pill" style="background:#1C2A3A;color:#00E8FF;">admin</span>' : ''} ${u.is_banned ? '<span class="pill" style="background:#2A0F1A;color:#FF6B9A;">banned</span>' : ''}</p>
+          <p class="text-xs text-mute">joined ${timeAgo(u.created_at)} ${u.telegram_id ? '· linked' : '· not linked'}</p>
+        </div>
+        <button onclick='toggleBan(${u.id}, ${!u.is_banned})' class="px-3 py-1.5 rounded-lg text-xs font-medium" style="background:${u.is_banned ? '#122A1C' : '#2A0F1A'};color:${u.is_banned ? '#4ADE80' : '#FF6B9A'};">${u.is_banned ? 'Unban' : 'Ban'}</button>
+      </div>`).join('') : `<p class="text-sm text-mute py-6 text-center">No users found.</p>`;
+  }, 200);
+}
+
+async function toggleBan(id, ban) {
+  await api(`/api/admin/users/${id}/${ban ? 'ban' : 'unban'}`, { method: 'POST' });
+  loadUsers(document.getElementById('user-search').value);
+}
+
+async function loadReports() {
+  const reports = await api('/api/admin/reports');
+  document.getElementById('reports-list').innerHTML = reports.length ? reports.map(r => `
+    <div class="flex gap-3 p-3 rounded-xl" style="background:#1C1F2B;">
+      ${r.post?.mediaUrl ? `<img src="${r.post.mediaUrl}" class="w-16 h-16 rounded-lg object-cover">` : ''}
+      <div class="flex-1 min-w-0">
+        <p class="text-sm">Reported by <span class="font-medium">${r.reporterUsername}</span> · ${timeAgo(r.createdAt)}</p>
+        <p class="text-sm text-mute">Reason: ${r.reason}</p>
+        ${r.post ? `<p class="text-xs text-mute truncate">Post by @${r.post.owner}: ${r.post.caption || ''}</p>` : `<p class="text-xs text-mute">Post no longer exists</p>`}
+      </div>
+      <div class="flex flex-col gap-2 shrink-0">
+        <button onclick="resolveReport(${r.id})" class="px-3 py-1.5 rounded-lg text-xs font-medium" style="background:#122A1C;color:#4ADE80;">Dismiss</button>
+        ${r.post ? `<button onclick="deleteReportedPost(${r.post.id}, ${r.id})" class="px-3 py-1.5 rounded-lg text-xs font-medium" style="background:#2A0F1A;color:#FF6B9A;">Delete post</button>` : ''}
+      </div>
+    </div>`).join('') : `<p class="text-sm text-mute py-6 text-center">No open reports. 🎉</p>`;
+}
+async function resolveReport(id) { await api(`/api/admin/reports/${id}/resolve`, { method: 'POST' }); loadReports(); }
+async function deleteReportedPost(postId, reportId) {
+  await api(`/api/posts/${postId}`, { method: 'DELETE' });
+  await api(`/api/admin/reports/${reportId}/resolve`, { method: 'POST' });
+  loadReports(); loadStats();
+}
+
+async function sendBroadcast() {
+  const message = document.getElementById('broadcast-text').value.trim();
+  if (!message) return;
+  const btn = document.getElementById('broadcast-btn');
+  btn.disabled = true;
+  try {
+    const res = await api('/api/admin/broadcast', { method: 'POST', body: JSON.stringify({ message }) });
+    document.getElementById('broadcast-status').textContent = `Queued for ${res.queued} linked users.`;
+    document.getElementById('broadcast-text').value = '';
+  } catch (err) { document.getElementById('broadcast-status').textContent = err.message; }
+  finally { btn.disabled = false; }
+}
+
+async function inspectChat() {
+  const u1 = document.getElementById('inspect-user1').value.trim();
+  const u2 = document.getElementById('inspect-user2').value.trim();
+  const box = document.getElementById('inspect-results');
+  if (!u1 || !u2) return;
+  try {
+    const msgs = await api(`/api/admin/chat?user1=${encodeURIComponent(u1)}&user2=${encodeURIComponent(u2)}`);
+    box.innerHTML = msgs.length ? msgs.map(m => `<div class="text-sm px-3 py-2 rounded-lg" style="background:#1C1F2B;"><span class="font-medium">${m.from}:</span> ${m.body}</div>`).join('') : `<p class="text-sm text-mute text-center py-4">No messages between these two users.</p>`;
+  } catch (err) { box.innerHTML = `<p class="text-sm text-mute text-center py-4">${err.message}</p>`; }
+}
+
+boot();
+</script>
+</body>
+</html>

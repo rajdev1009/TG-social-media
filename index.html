@@ -1,0 +1,806 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>ECHO — Broadcast your signal</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    darkMode: 'class',
+    theme: {
+      extend: {
+        fontFamily: { display: ['"Space Grotesk"', 'sans-serif'], body: ['Inter', 'sans-serif'] },
+        colors: { void:'#0A0B10', panel:'#14161F', panel2:'#1C1F2B', hairline:'#262A38', ink:'#EDEFF7', mute:'#8A8FA3', pulse:'#FF2E7E', signal:'#00E8FF' },
+      },
+    },
+  };
+</script>
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+
+<style>
+  :root{ --brightness: 100%; }
+  html{ filter: brightness(var(--brightness)); }
+  * { -webkit-tap-highlight-color: transparent; }
+  body { font-family:'Inter', sans-serif; background:#0A0B10; color:#EDEFF7; overscroll-behavior-y:none; }
+  .font-display{ font-family:'Space Grotesk', sans-serif; }
+
+  html.light body{ background:#F5F6FA; color:#14161F; }
+  html.light .surface-panel{ background:#FFFFFF !important; border-color:#E7E9F0 !important; }
+  html.light .surface-panel2{ background:#F0F1F6 !important; border-color:#E7E9F0 !important; }
+  html.light .text-mute-t{ color:#6B7280 !important; }
+  html.light .hairline{ border-color:#E7E9F0 !important; }
+  html.light .topbar, html.light .bottombar{ background: rgba(255,255,255,0.86) !important; }
+  html.light .story-label{ color:#3F4354 !important; }
+
+  @property --a { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
+  @keyframes spin-signal { to { --a: 360deg; } }
+  .signal-ring{ position:relative; }
+  .signal-ring::before{
+    content:''; position:absolute; inset:-3px; border-radius:9999px;
+    background: conic-gradient(from var(--a), #FF2E7E, #7A2EFF 35%, #00E8FF 60%, #FF2E7E 100%);
+    animation: spin-signal 4s linear infinite; z-index:0;
+  }
+  .signal-ring.seen::before{ background:#33384A; animation:none; }
+  .signal-ring > .ring-inner{ position:relative; z-index:1; border-radius:9999px; border:3px solid #0A0B10; }
+  html.light .signal-ring > .ring-inner{ border-color:#F5F6FA; }
+  .fab-signal{ background: conic-gradient(from var(--a), #FF2E7E, #7A2EFF 35%, #00E8FF 60%, #FF2E7E 100%); animation: spin-signal 6s linear infinite; }
+
+  .no-scrollbar::-webkit-scrollbar{ display:none; }
+  .no-scrollbar{ -ms-overflow-style:none; scrollbar-width:none; }
+
+  @keyframes pop { 0%{transform:scale(1);} 40%{transform:scale(1.35);} 100%{transform:scale(1);} }
+  .pop{ animation: pop .32s ease; }
+
+  .drawer{ transform: translateX(100%); transition: transform .32s cubic-bezier(.2,.8,.2,1); }
+  .drawer.open{ transform: translateX(0); }
+  .sheet{ transform: translateY(100%); transition: transform .32s cubic-bezier(.2,.8,.2,1); }
+  .sheet.open{ transform: translateY(0); }
+  .scrim{ opacity:0; pointer-events:none; transition: opacity .28s ease; }
+  .scrim.open{ opacity:1; pointer-events:auto; }
+
+  input[type=range].signal-slider{ -webkit-appearance:none; appearance:none; height:4px; border-radius:9999px; background:linear-gradient(90deg,#FF2E7E,#00E8FF); }
+  input[type=range].signal-slider::-webkit-slider-thumb{ -webkit-appearance:none; appearance:none; width:18px; height:18px; border-radius:9999px; background:#fff; border:3px solid #FF2E7E; box-shadow:0 0 12px rgba(255,46,126,.6); cursor:pointer; }
+
+  .story-progress-fill{ animation-name: fillbar; animation-timing-function:linear; animation-fill-mode: forwards; }
+  @keyframes fillbar{ from{ width:0%; } to{ width:100%; } }
+
+  .app-shell{ max-width: 480px; }
+
+  .spinner{ width:22px; height:22px; border-radius:9999px; border:2.5px solid #33384A; border-top-color:#FF2E7E; animation: spin 0.7s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .auth-input{ background:#14161F; border:1px solid #262A38; }
+</style>
+</head>
+
+<body class="min-h-screen flex justify-center font-body">
+
+<!-- ============ AUTH SCREEN ============ -->
+<div id="auth-screen" class="app-shell w-full min-h-screen flex flex-col justify-center px-6" style="background:#0A0B10;">
+  <div class="flex items-center gap-2 justify-center mb-8">
+    <i data-lucide="radio" class="w-7 h-7" style="color:#FF2E7E"></i>
+    <span class="font-display font-bold text-3xl tracking-tight">ECHO</span>
+  </div>
+
+  <div class="flex rounded-xl overflow-hidden border hairline border-hairline mb-5">
+    <button id="tab-login" onclick="switchAuthTab('login')" class="flex-1 py-2.5 text-sm font-medium" style="background:#FF2E7E;">Log in</button>
+    <button id="tab-register" onclick="switchAuthTab('register')" class="flex-1 py-2.5 text-sm font-medium">Sign up</button>
+  </div>
+
+  <div id="auth-error" class="hidden mb-3 text-sm px-3 py-2 rounded-lg" style="background:#2A0F1A; color:#FF6B9A;"></div>
+
+  <form id="auth-form" class="space-y-3" onsubmit="return submitAuth(event)">
+    <input id="auth-username" required placeholder="Username" autocomplete="username" class="auth-input w-full rounded-xl px-4 py-3 text-sm outline-none">
+    <input id="auth-password" required type="password" placeholder="Password" autocomplete="current-password" class="auth-input w-full rounded-xl px-4 py-3 text-sm outline-none">
+    <button type="submit" id="auth-submit" class="w-full py-3 rounded-xl font-medium text-sm text-white flex items-center justify-center gap-2" style="background:linear-gradient(135deg,#FF2E7E,#7A2EFF,#00E8FF);">
+      <span id="auth-submit-label">Log in</span>
+    </button>
+  </form>
+</div>
+
+<!-- ============ APP SHELL (hidden until authenticated) ============ -->
+<div id="app-shell" class="hidden app-shell w-full min-h-screen relative border-x hairline border-hairline" style="background:#0A0B10;">
+
+  <header class="topbar sticky top-0 z-30 flex items-center justify-between px-4 h-14 border-b hairline border-hairline backdrop-blur" style="background:rgba(10,11,16,0.86);">
+    <div class="flex items-center gap-1.5">
+      <i data-lucide="radio" class="w-5 h-5" style="color:#FF2E7E"></i>
+      <span class="font-display font-bold text-lg tracking-tight">ECHO</span>
+    </div>
+    <div class="flex items-center gap-4">
+      <button onclick="showScreen('explore')" class="active:scale-90 transition"><i data-lucide="search" class="w-5 h-5"></i></button>
+      <button onclick="showScreen('dm')" class="relative active:scale-90 transition"><i data-lucide="send" class="w-5 h-5"></i></button>
+    </div>
+  </header>
+
+  <!-- FEED -->
+  <main id="screen-feed" class="pb-20">
+    <section class="px-3 pt-3 pb-2 border-b hairline border-hairline">
+      <div id="stories-rail" class="flex gap-4 overflow-x-auto no-scrollbar px-1"></div>
+    </section>
+    <section id="feed-list" class="divide-y hairline divide-hairline"></section>
+    <div id="feed-loading" class="flex justify-center py-8"><div class="spinner"></div></div>
+  </main>
+
+  <!-- EXPLORE -->
+  <main id="screen-explore" class="hidden pb-20 px-0.5 pt-0.5">
+    <div class="px-3 py-2">
+      <div class="flex items-center gap-2 surface-panel border hairline border-hairline rounded-xl px-3 py-2" style="background:#14161F;">
+        <i data-lucide="search" class="w-4 h-4" style="color:#8A8FA3"></i>
+        <input id="explore-search" oninput="searchUsers(this.value)" placeholder="Search creators" class="bg-transparent outline-none text-sm w-full" style="color:inherit">
+      </div>
+    </div>
+    <div id="explore-results" class="px-3"></div>
+    <div id="explore-search-empty">
+      <div class="px-3 pb-2">
+        <p class="text-xs uppercase tracking-wider text-mute-t mb-2" style="color:#8A8FA3">Suggested for you</p>
+        <div id="suggested-users" class="flex gap-3 overflow-x-auto no-scrollbar pb-1"></div>
+      </div>
+      <p class="text-xs uppercase tracking-wider text-mute-t px-3 mb-2 mt-3" style="color:#8A8FA3">Trending</p>
+    </div>
+    <div id="explore-grid" class="grid grid-cols-3 gap-0.5"></div>
+  </main>
+
+  <!-- ACTIVITY -->
+  <main id="screen-activity" class="hidden pb-20">
+    <div class="flex items-center px-4 h-14 border-b hairline border-hairline">
+      <span class="font-display font-semibold text-base">Activity</span>
+    </div>
+    <div id="activity-list" class="divide-y hairline divide-hairline"></div>
+  </main>
+
+  <!-- DM LIST -->
+  <main id="screen-dm" class="hidden pb-20">
+    <div class="flex items-center gap-3 px-4 h-14 border-b hairline border-hairline">
+      <button onclick="showScreen('feed')" class="active:scale-90 transition"><i data-lucide="chevron-left" class="w-5 h-5"></i></button>
+      <span class="font-display font-semibold text-base">Signals</span>
+    </div>
+    <div class="px-3 py-2">
+      <div class="flex items-center gap-2 surface-panel border hairline border-hairline rounded-xl px-3 py-2" style="background:#14161F;">
+        <i data-lucide="user-plus" class="w-4 h-4" style="color:#8A8FA3"></i>
+        <input id="dm-search" oninput="searchUsersForDm(this.value)" placeholder="Start a new chat…" class="bg-transparent outline-none text-sm w-full" style="color:inherit">
+      </div>
+      <div id="dm-search-results" class="mt-1"></div>
+    </div>
+    <div id="dm-list" class="divide-y hairline divide-hairline"></div>
+  </main>
+
+  <!-- DM THREAD -->
+  <main id="screen-dm-thread" class="hidden pb-0 flex flex-col" style="height:100vh;">
+    <div class="flex items-center gap-3 px-4 h-14 border-b hairline border-hairline shrink-0">
+      <button onclick="showScreen('dm')" class="active:scale-90 transition"><i data-lucide="chevron-left" class="w-5 h-5"></i></button>
+      <img id="thread-avatar" class="w-8 h-8 rounded-full object-cover bg-white/10" src="">
+      <span id="thread-name" class="font-medium text-sm"></span>
+    </div>
+    <div id="thread-messages" class="flex-1 overflow-y-auto px-3 py-3 space-y-2 no-scrollbar"></div>
+    <div class="flex items-center gap-2 px-3 py-3 border-t hairline border-hairline shrink-0">
+      <input id="thread-input" placeholder="Send a message…" class="flex-1 surface-panel border hairline border-hairline rounded-full px-4 py-2 text-sm bg-transparent outline-none" style="background:#14161F;">
+      <button onclick="sendMessage()" class="w-9 h-9 rounded-full flex items-center justify-center active:scale-90 transition" style="background:linear-gradient(135deg,#FF2E7E,#00E8FF)">
+        <i data-lucide="send" class="w-4 h-4 text-white"></i>
+      </button>
+    </div>
+  </main>
+
+  <!-- PROFILE -->
+  <main id="screen-profile" class="hidden pb-20">
+    <div class="flex items-center justify-between px-4 h-14 border-b hairline border-hairline">
+      <span class="font-display font-semibold text-base tracking-tight" id="profile-handle">@</span>
+      <button onclick="openSettings()" class="active:scale-90 transition"><i data-lucide="menu" class="w-5 h-5"></i></button>
+    </div>
+    <div class="px-4 pt-5">
+      <div class="flex items-center gap-5">
+        <div class="signal-ring">
+          <img id="profile-avatar" class="ring-inner w-20 h-20 object-cover bg-white/10" src="">
+        </div>
+        <div class="flex-1 grid grid-cols-3 text-center">
+          <div><p class="font-display font-bold text-lg" id="stat-posts">0</p><p class="text-xs text-mute-t" style="color:#8A8FA3">Posts</p></div>
+          <div><p class="font-display font-bold text-lg" id="stat-followers">0</p><p class="text-xs text-mute-t" style="color:#8A8FA3">Followers</p></div>
+          <div><p class="font-display font-bold text-lg" id="stat-following">0</p><p class="text-xs text-mute-t" style="color:#8A8FA3">Following</p></div>
+        </div>
+      </div>
+      <div class="mt-4">
+        <p class="font-medium text-sm" id="profile-username-line"></p>
+        <p class="text-sm text-mute-t" id="profile-bio" style="color:#8A8FA3">No bio yet.</p>
+      </div>
+      <button class="mt-4 w-full py-2 rounded-xl border hairline border-hairline text-sm font-medium active:scale-[0.98] transition">Edit profile</button>
+    </div>
+    <div class="grid grid-cols-3 gap-0.5 mt-5" id="profile-grid"></div>
+  </main>
+
+  <!-- BOTTOM NAV -->
+  <nav class="bottombar fixed bottom-0 left-1/2 -translate-x-1/2 app-shell w-full flex items-center justify-around h-16 border-t hairline border-hairline backdrop-blur z-30" style="background:rgba(10,11,16,0.86); max-width:480px;">
+    <button onclick="showScreen('feed')" data-tab="feed" class="tab-btn flex flex-col items-center gap-0.5 active:scale-90 transition"><i data-lucide="home" class="w-5 h-5"></i></button>
+    <button onclick="showScreen('explore')" data-tab="explore" class="tab-btn flex flex-col items-center gap-0.5 active:scale-90 transition"><i data-lucide="compass" class="w-5 h-5"></i></button>
+    <button onclick="openComposer()" class="active:scale-90 transition">
+      <div class="fab-signal w-10 h-10 rounded-2xl flex items-center justify-center">
+        <div class="w-[34px] h-[34px] rounded-[13px] flex items-center justify-center" style="background:#0A0B10;"><i data-lucide="plus" class="w-5 h-5"></i></div>
+      </div>
+    </button>
+    <button onclick="showScreen('activity')" data-tab="activity" class="tab-btn flex flex-col items-center gap-0.5 active:scale-90 transition relative">
+      <i data-lucide="heart" class="w-5 h-5"></i>
+      <span id="activity-badge" class="hidden absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full" style="background:#FF2E7E"></span>
+    </button>
+    <button onclick="showScreen('profile')" data-tab="profile" class="tab-btn active:scale-90 transition">
+      <img id="nav-avatar" class="w-6 h-6 rounded-full object-cover bg-white/10" src="">
+    </button>
+  </nav>
+
+  <!-- SETTINGS DRAWER -->
+  <div id="scrim-settings" class="scrim fixed inset-0 bg-black/60 z-40" onclick="closeSettings()"></div>
+  <aside id="settings-drawer" class="drawer surface-panel fixed top-0 right-0 h-full w-[82%] max-w-[360px] z-50 p-5 overflow-y-auto no-scrollbar" style="background:#14161F;">
+    <div class="flex items-center justify-between mb-6">
+      <h2 class="font-display font-semibold text-lg">Settings</h2>
+      <button onclick="closeSettings()" class="active:scale-90 transition"><i data-lucide="x" class="w-5 h-5"></i></button>
+    </div>
+    <div class="flex items-center justify-between py-3">
+      <div class="flex items-center gap-3"><i data-lucide="moon" class="w-4 h-4" style="color:#00E8FF"></i><span class="text-sm font-medium">Dark mode</span></div>
+      <button id="theme-switch" onclick="toggleTheme()" class="w-11 h-6 rounded-full relative transition" style="background:#FF2E7E;"><span id="theme-knob" class="absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white transition-transform"></span></button>
+    </div>
+    <div class="py-4 border-t hairline border-hairline mt-1">
+      <div class="flex items-center gap-3 mb-3"><i data-lucide="sun-medium" class="w-4 h-4" style="color:#FF2E7E"></i><span class="text-sm font-medium">Brightness</span><span id="brightness-val" class="ml-auto text-xs text-mute-t" style="color:#8A8FA3">100%</span></div>
+      <input type="range" min="50" max="150" value="100" class="signal-slider w-full" oninput="setBrightness(this.value)">
+    </div>
+    <div class="py-3 border-t hairline border-hairline">
+      <p class="text-xs uppercase tracking-wider text-mute-t mb-2" style="color:#8A8FA3">Privacy</p>
+      <button class="settings-row" onclick="toggleRow(this)"><i data-lucide="lock" class="w-4 h-4"></i><span>Private account</span><span class="row-toggle ml-auto w-10 h-5 rounded-full relative" style="background:#33384A;"><span class="row-knob absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform"></span></span></button>
+      <button class="settings-row" onclick="toggleRow(this)"><i data-lucide="eye-off" class="w-4 h-4"></i><span>Hide activity status</span><span class="row-toggle ml-auto w-10 h-5 rounded-full relative" style="background:#33384A;"><span class="row-knob absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform"></span></span></button>
+    </div>
+    <div class="py-3 border-t hairline border-hairline">
+      <p class="text-xs uppercase tracking-wider text-mute-t mb-2" style="color:#8A8FA3">Security</p>
+      <button class="settings-row"><i data-lucide="key-round" class="w-4 h-4"></i><span>Change password</span><i data-lucide="chevron-right" class="w-4 h-4 ml-auto" style="color:#8A8FA3"></i></button>
+      <button class="settings-row"><i data-lucide="shield-check" class="w-4 h-4"></i><span>Two-factor authentication</span><i data-lucide="chevron-right" class="w-4 h-4 ml-auto" style="color:#8A8FA3"></i></button>
+    </div>
+    <button onclick="logout()" class="mt-4 w-full py-2.5 rounded-xl text-sm font-medium text-center" style="background:#2A0F1A; color:#FF2E7E;">Log out</button>
+  </aside>
+
+  <!-- COMPOSER -->
+  <div id="scrim-composer" class="scrim fixed inset-0 bg-black/60 z-40" onclick="closeComposer()"></div>
+  <div id="composer-sheet" class="sheet surface-panel fixed bottom-0 left-1/2 -translate-x-1/2 app-shell w-full max-w-[480px] z-50 rounded-t-3xl p-5" style="background:#14161F;">
+    <div class="w-10 h-1 rounded-full bg-white/15 mx-auto mb-4"></div>
+    <h2 class="font-display font-semibold text-lg mb-4">New post</h2>
+    <label class="block border-2 border-dashed hairline border-hairline rounded-2xl h-40 flex flex-col items-center justify-center gap-2 cursor-pointer mb-3" id="dropzone">
+      <i data-lucide="image-plus" class="w-6 h-6" style="color:#00E8FF"></i>
+      <span class="text-sm text-mute-t" style="color:#8A8FA3">Tap to add photo or video</span>
+      <input type="file" accept="image/*,video/*" class="hidden" onchange="previewComposerMedia(event)">
+    </label>
+    <textarea id="composer-caption" rows="2" placeholder="Write a caption…" class="w-full surface-panel2 border hairline border-hairline rounded-xl p-3 text-sm bg-transparent outline-none" style="background:#1C1F2B;"></textarea>
+    <button onclick="sharePost()" id="share-post-btn" class="mt-4 w-full py-3 rounded-xl font-medium text-sm text-white active:scale-[0.98] transition flex items-center justify-center gap-2" style="background:linear-gradient(135deg,#FF2E7E,#7A2EFF,#00E8FF);">Share</button>
+  </div>
+
+  <!-- STORY CREATOR -->
+  <div id="scrim-story-create" class="scrim fixed inset-0 bg-black/70 z-40"></div>
+  <div id="story-create-sheet" class="sheet fixed bottom-0 left-1/2 -translate-x-1/2 app-shell w-full max-w-[480px] z-50 rounded-t-3xl p-5" style="background:#14161F;">
+    <div class="w-10 h-1 rounded-full bg-white/15 mx-auto mb-4"></div>
+    <h2 class="font-display font-semibold text-lg mb-4">New story</h2>
+    <div id="story-preview" class="h-56 rounded-2xl flex items-center justify-center mb-4 text-white/70 text-sm" style="background:linear-gradient(135deg,#FF2E7E,#7A2EFF);">Tap a theme below</div>
+    <p class="text-xs uppercase tracking-wider text-mute-t mb-2" style="color:#8A8FA3">Background theme</p>
+    <div class="flex gap-2 mb-4">
+      <button onclick="setStoryTheme('linear-gradient(135deg,#FF2E7E,#7A2EFF)')" class="w-9 h-9 rounded-full" style="background:linear-gradient(135deg,#FF2E7E,#7A2EFF)"></button>
+      <button onclick="setStoryTheme('linear-gradient(135deg,#00E8FF,#0A0B10)')" class="w-9 h-9 rounded-full" style="background:linear-gradient(135deg,#00E8FF,#0A0B10)"></button>
+      <button onclick="setStoryTheme('linear-gradient(135deg,#7A2EFF,#00E8FF)')" class="w-9 h-9 rounded-full" style="background:linear-gradient(135deg,#7A2EFF,#00E8FF)"></button>
+      <button onclick="setStoryTheme('#0A0B10')" class="w-9 h-9 rounded-full border hairline border-hairline" style="background:#0A0B10"></button>
+      <button onclick="openStickerDrawer()" class="w-9 h-9 rounded-full flex items-center justify-center border hairline border-hairline"><i data-lucide="smile" class="w-4 h-4"></i></button>
+    </div>
+    <div class="flex gap-2">
+      <button onclick="closeStoryCreate()" class="flex-1 py-3 rounded-xl border hairline border-hairline text-sm font-medium">Cancel</button>
+      <button onclick="shareStory()" class="flex-1 py-3 rounded-xl font-medium text-sm text-white" style="background:linear-gradient(135deg,#FF2E7E,#00E8FF);">Share to story</button>
+    </div>
+  </div>
+
+  <!-- STICKER DRAWER -->
+  <div id="scrim-sticker" class="scrim fixed inset-0 bg-black/70 z-[60]" onclick="closeStickerDrawer()"></div>
+  <div id="sticker-sheet" class="sheet fixed bottom-0 left-1/2 -translate-x-1/2 app-shell w-full max-w-[480px] z-[70] rounded-t-3xl p-5" style="background:#1C1F2B;">
+    <div class="w-10 h-1 rounded-full bg-white/15 mx-auto mb-4"></div>
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="font-display font-semibold text-base">Stickers</h2>
+      <span class="text-xs text-mute-t" style="color:#8A8FA3">Synced from admin</span>
+    </div>
+    <div id="sticker-grid" class="grid grid-cols-5 gap-3 max-h-56 overflow-y-auto no-scrollbar"></div>
+  </div>
+
+  <!-- STORY VIEWER -->
+  <div id="story-viewer" class="hidden fixed inset-0 z-[80] bg-black">
+    <div class="absolute top-0 left-0 right-0 p-3 flex gap-1 z-10" id="story-bars"></div>
+    <div class="absolute top-6 left-0 right-0 px-3 flex items-center gap-2 z-10">
+      <img id="story-user-avatar" class="w-8 h-8 rounded-full object-cover bg-white/10" src="">
+      <span id="story-user-name" class="text-sm font-medium text-white"></span>
+      <button onclick="closeStoryViewer()" class="ml-auto"><i data-lucide="x" class="w-5 h-5 text-white"></i></button>
+    </div>
+    <div id="story-viewer-content" class="w-full h-full flex items-center justify-center text-white font-display text-xl px-8 text-center"></div>
+    <button onclick="prevStory()" class="absolute left-0 top-0 h-full w-1/3"></button>
+    <button onclick="nextStory()" class="absolute right-0 top-0 h-full w-1/3"></button>
+  </div>
+
+</div>
+
+<script>
+lucide.createIcons();
+
+/* =========================================================
+   API HELPER
+   ========================================================= */
+async function api(path, opts = {}) {
+  const res = await fetch(path, {
+    credentials: 'same-origin',
+    headers: opts.body instanceof FormData ? {} : { 'Content-Type': 'application/json' },
+    ...opts,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: 'Request failed' }));
+    throw new Error(err.error || 'Request failed');
+  }
+  return res.json();
+}
+
+let currentUser = null;
+let mySeenStories = new Set();
+
+/* =========================================================
+   AUTH
+   ========================================================= */
+let authMode = 'login';
+function switchAuthTab(mode) {
+  authMode = mode;
+  document.getElementById('tab-login').style.background = mode === 'login' ? '#FF2E7E' : 'transparent';
+  document.getElementById('tab-register').style.background = mode === 'register' ? '#FF2E7E' : 'transparent';
+  document.getElementById('auth-submit-label').textContent = mode === 'login' ? 'Log in' : 'Sign up';
+  document.getElementById('auth-error').classList.add('hidden');
+}
+
+async function submitAuth(e) {
+  e.preventDefault();
+  const username = document.getElementById('auth-username').value.trim();
+  const password = document.getElementById('auth-password').value;
+  const errBox = document.getElementById('auth-error');
+  const btn = document.getElementById('auth-submit');
+  errBox.classList.add('hidden');
+  btn.disabled = true;
+  try {
+    const endpoint = authMode === 'login' ? '/api/login' : '/api/register';
+    const user = await api(endpoint, { method: 'POST', body: JSON.stringify({ username, password }) });
+    currentUser = user;
+    await enterApp();
+  } catch (err) {
+    errBox.textContent = err.message;
+    errBox.classList.remove('hidden');
+  } finally {
+    btn.disabled = false;
+  }
+  return false;
+}
+
+async function tryResumeSession() {
+  try {
+    const me = await api('/api/me');
+    currentUser = me;
+    await enterApp();
+  } catch {
+    document.getElementById('auth-screen').classList.remove('hidden');
+  }
+}
+
+async function enterApp() {
+  document.getElementById('auth-screen').classList.add('hidden');
+  document.getElementById('app-shell').classList.remove('hidden');
+  await Promise.all([loadFeed(), loadStories()]);
+  await loadMe();
+  refreshActivityBadge();
+  showScreen('feed');
+}
+
+async function refreshActivityBadge() {
+  try {
+    const items = await api('/api/notifications');
+    document.getElementById('activity-badge').classList.toggle('hidden', !items.some(n => !n.read));
+  } catch {}
+}
+
+async function logout() {
+  try { await api('/api/logout', { method: 'POST' }); } catch {}
+  location.reload();
+}
+
+/* =========================================================
+   NAVIGATION
+   ========================================================= */
+function showScreen(name) {
+  ['feed', 'explore', 'activity', 'dm', 'dm-thread', 'profile'].forEach(s => {
+    document.getElementById('screen-' + s).classList.toggle('hidden', s !== name);
+  });
+  document.querySelectorAll('.tab-btn').forEach(b => { b.style.opacity = (b.dataset.tab === name) ? '1' : '.55'; });
+  if (name === 'dm') loadConversations();
+  if (name === 'explore') loadExplore();
+  if (name === 'activity') loadNotifications();
+  window.scrollTo(0, 0);
+}
+
+/* =========================================================
+   STORIES
+   ========================================================= */
+let stories = [];
+async function loadStories() {
+  try { stories = await api('/api/stories'); } catch { stories = []; }
+  renderStories();
+}
+function renderStories() {
+  const rail = document.getElementById('stories-rail');
+  const mine = `
+    <button onclick="openStoryCreate()" class="flex flex-col items-center gap-1.5 shrink-0 w-16">
+      <div class="signal-ring seen">
+        <img src="${currentUser?.avatarUrl || fallbackAvatar()}" class="ring-inner w-16 h-16 object-cover bg-white/10">
+        <div class="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full flex items-center justify-center z-10" style="background:#FF2E7E;"><i data-lucide="plus" class="w-3 h-3 text-white"></i></div>
+      </div>
+      <span class="story-label text-[11px] truncate w-16 text-center" style="color:#C7CADA;">Your story</span>
+    </button>`;
+  const others = stories.map((s, i) => `
+    <button onclick="openStoryViewer(${i})" class="flex flex-col items-center gap-1.5 shrink-0 w-16">
+      <div class="signal-ring ${mySeenStories.has(s.id) ? 'seen' : ''}">
+        <img src="${s.user.avatarUrl || fallbackAvatar()}" class="ring-inner w-16 h-16 object-cover bg-white/10">
+      </div>
+      <span class="story-label text-[11px] truncate w-16 text-center" style="color:#C7CADA;">${s.user.username}</span>
+    </button>`).join('');
+  rail.innerHTML = mine + others;
+  lucide.createIcons();
+}
+
+let currentStoryIndex = 0, storyTimer;
+function openStoryViewer(i) {
+  currentStoryIndex = i;
+  const s = stories[i];
+  mySeenStories.add(s.id);
+  document.getElementById('story-viewer').classList.remove('hidden');
+  document.getElementById('story-user-avatar').src = s.user.avatarUrl || fallbackAvatar();
+  document.getElementById('story-user-name').textContent = s.user.username;
+  const content = document.getElementById('story-viewer-content');
+  if (s.mediaUrl) {
+    content.innerHTML = `<img src="${s.mediaUrl}" class="max-w-full max-h-full object-contain">`;
+  } else {
+    content.style.background = s.bgTheme || 'linear-gradient(135deg,#FF2E7E,#7A2EFF)';
+    content.textContent = s.sticker || '';
+  }
+  document.getElementById('story-bars').innerHTML = `<div class="flex-1 h-0.5 rounded-full bg-white/25 overflow-hidden"><div class="h-full bg-white story-progress-fill" style="animation-duration:4s;"></div></div>`;
+  clearTimeout(storyTimer);
+  storyTimer = setTimeout(nextStory, 4000);
+  renderStories();
+}
+function nextStory() { clearTimeout(storyTimer); if (currentStoryIndex < stories.length - 1) openStoryViewer(currentStoryIndex + 1); else closeStoryViewer(); }
+function prevStory() { clearTimeout(storyTimer); if (currentStoryIndex > 0) openStoryViewer(currentStoryIndex - 1); }
+function closeStoryViewer() { clearTimeout(storyTimer); document.getElementById('story-viewer').classList.add('hidden'); }
+
+function openStoryCreate() { document.getElementById('scrim-story-create').classList.add('open'); document.getElementById('story-create-sheet').classList.add('open'); }
+function closeStoryCreate() { document.getElementById('scrim-story-create').classList.remove('open'); document.getElementById('story-create-sheet').classList.remove('open'); }
+let storyThemeBg = null, storySticker = '';
+function setStoryTheme(bg) { storyThemeBg = bg; const p = document.getElementById('story-preview'); p.style.background = bg; p.textContent = storySticker; }
+async function shareStory() {
+  const fd = new FormData();
+  fd.append('bgTheme', storyThemeBg || 'linear-gradient(135deg,#FF2E7E,#7A2EFF)');
+  fd.append('sticker', storySticker || '');
+  try {
+    await api('/api/stories', { method: 'POST', body: fd });
+    closeStoryCreate();
+    storySticker = '';
+    await loadStories();
+  } catch (err) { alert(err.message); }
+}
+
+/* =========================================================
+   STICKERS
+   ========================================================= */
+async function openStickerDrawer() {
+  let stickers = [];
+  try { stickers = await api('/api/stickers'); } catch {}
+  const grid = document.getElementById('sticker-grid');
+  grid.innerHTML = stickers.length
+    ? stickers.map(s => `<button onclick="pickSticker('${s.emojiLabel || '✨'}')" class="aspect-square rounded-xl overflow-hidden border hairline border-hairline active:scale-90 transition" style="background:#14161F;"><img src="${s.url}" class="w-full h-full object-cover"></button>`).join('')
+    : `<p class="col-span-5 text-sm text-mute-t text-center py-4" style="color:#8A8FA3">No stickers synced yet — admin can forward one to the bot.</p>`;
+  document.getElementById('scrim-sticker').classList.add('open');
+  document.getElementById('sticker-sheet').classList.add('open');
+}
+function closeStickerDrawer() { document.getElementById('scrim-sticker').classList.remove('open'); document.getElementById('sticker-sheet').classList.remove('open'); }
+function pickSticker(s) {
+  storySticker = s;
+  const p = document.getElementById('story-preview');
+  p.textContent = s;
+  closeStickerDrawer();
+}
+
+/* =========================================================
+   FEED
+   ========================================================= */
+let posts = [];
+async function loadFeed() {
+  document.getElementById('feed-loading').classList.remove('hidden');
+  try { posts = await api('/api/feed'); } catch { posts = []; }
+  document.getElementById('feed-loading').classList.add('hidden');
+  renderFeed();
+}
+function renderFeed() {
+  const list = document.getElementById('feed-list');
+  if (!posts.length) {
+    list.innerHTML = `<p class="text-center text-sm text-mute-t py-10" style="color:#8A8FA3">No signals yet. Be the first to post.</p>`;
+    return;
+  }
+  list.innerHTML = posts.map(p => `
+    <article class="py-3" data-post="${p.id}">
+      <div class="flex items-center justify-between px-3 mb-2">
+        <div class="flex items-center gap-2.5">
+          <img src="${p.user.avatarUrl || fallbackAvatar()}" class="w-8 h-8 rounded-full object-cover bg-white/10">
+          <span class="text-sm font-medium">${p.user.username}</span>
+          <span class="text-xs text-mute-t" style="color:#8A8FA3">· ${timeAgo(p.createdAt)}</span>
+        </div>
+        <button onclick="togglePostMenu(${p.id})" class="relative active:scale-90 transition">
+          <i data-lucide="more-horizontal" class="w-5 h-5"></i>
+          <div id="menu-${p.id}" class="hidden absolute right-0 top-6 w-40 surface-panel border hairline border-hairline rounded-xl overflow-hidden z-20 text-left" style="background:#1C1F2B;">
+            <button onclick="deletePost(${p.id})" class="w-full text-left px-3 py-2.5 text-sm hover:bg-white/5" style="color:#FF2E7E;">Delete post</button>
+            <button onclick="reportPost(${p.id})" class="w-full text-left px-3 py-2.5 text-sm hover:bg-white/5 border-t hairline border-hairline">Report</button>
+          </div>
+        </button>
+      </div>
+      ${p.mediaType === 'video'
+        ? `<video src="${p.mediaUrl}" class="w-full aspect-square object-cover" controls></video>`
+        : `<img src="${p.mediaUrl}" class="w-full aspect-square object-cover" ondblclick="likePost(${p.id}, true)">`}
+      <div class="flex items-center gap-4 px-3 pt-2.5">
+        <button onclick="likePost(${p.id})" class="active:scale-90 transition"><i id="heart-${p.id}" data-lucide="heart" class="w-6 h-6" style="${p.liked ? 'color:#FF2E7E;fill:#FF2E7E' : ''}"></i></button>
+        <button class="active:scale-90 transition"><i data-lucide="message-circle" class="w-6 h-6"></i></button>
+        <button class="active:scale-90 transition"><i data-lucide="send" class="w-6 h-6"></i></button>
+      </div>
+      <p class="px-3 pt-1.5 text-sm font-medium" id="likes-${p.id}">${p.likes.toLocaleString()} signals</p>
+      <p class="px-3 pt-0.5 text-sm"><span class="font-medium">${p.user.username}</span> ${p.caption}</p>
+    </article>
+  `).join('');
+  lucide.createIcons();
+}
+
+async function likePost(id, forceLike) {
+  const p = posts.find(x => x.id === id);
+  if (forceLike && p.liked) return;
+  try {
+    const res = await api(`/api/posts/${id}/like`, { method: 'POST' });
+    p.liked = res.liked; p.likes = res.likes;
+    const heart = document.getElementById('heart-' + id);
+    heart.style.color = p.liked ? '#FF2E7E' : ''; heart.style.fill = p.liked ? '#FF2E7E' : 'none';
+    heart.classList.remove('pop'); void heart.offsetWidth; heart.classList.add('pop');
+    document.getElementById('likes-' + id).textContent = p.likes.toLocaleString() + ' signals';
+  } catch (err) { console.error(err); }
+}
+function togglePostMenu(id) { closeAllMenus(); document.getElementById('menu-' + id).classList.toggle('hidden'); }
+function closeAllMenus() { document.querySelectorAll('[id^="menu-"]').forEach(m => m.classList.add('hidden')); }
+async function deletePost(id) {
+  try { await api(`/api/posts/${id}`, { method: 'DELETE' }); posts = posts.filter(p => p.id !== id); renderFeed(); }
+  catch (err) { alert(err.message); }
+}
+async function reportPost(id) {
+  closeAllMenus();
+  try { await api(`/api/posts/${id}/report`, { method: 'POST', body: JSON.stringify({ reason: 'inappropriate' }) }); alert('Reported. Our admin team will review it.'); }
+  catch (err) { alert(err.message); }
+}
+document.addEventListener('click', (e) => { if (!e.target.closest('[onclick^="togglePostMenu"]')) closeAllMenus(); });
+
+/* =========================================================
+   COMPOSER
+   ========================================================= */
+let pendingFile = null;
+function openComposer() { document.getElementById('scrim-composer').classList.add('open'); document.getElementById('composer-sheet').classList.add('open'); }
+function closeComposer() { document.getElementById('scrim-composer').classList.remove('open'); document.getElementById('composer-sheet').classList.remove('open'); }
+function previewComposerMedia(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  pendingFile = file;
+  document.getElementById('dropzone').innerHTML = file.type.startsWith('video')
+    ? `<video src="${URL.createObjectURL(file)}" class="w-full h-full object-cover rounded-2xl" muted></video>`
+    : `<img src="${URL.createObjectURL(file)}" class="w-full h-full object-cover rounded-2xl">`;
+}
+async function sharePost() {
+  if (!pendingFile) { alert('Add a photo or video first.'); return; }
+  const btn = document.getElementById('share-post-btn');
+  btn.disabled = true; btn.textContent = 'Uploading…';
+  const fd = new FormData();
+  fd.append('media', pendingFile);
+  fd.append('caption', document.getElementById('composer-caption').value.trim());
+  try {
+    await api('/api/posts', { method: 'POST', body: fd });
+    document.getElementById('composer-caption').value = '';
+    document.getElementById('dropzone').innerHTML = `<i data-lucide="image-plus" class="w-6 h-6" style="color:#00E8FF"></i><span class="text-sm text-mute-t" style="color:#8A8FA3">Tap to add photo or video</span><input type="file" accept="image/*,video/*" class="hidden" onchange="previewComposerMedia(event)">`;
+    pendingFile = null;
+    closeComposer();
+    await loadFeed();
+    lucide.createIcons();
+  } catch (err) { alert(err.message); }
+  finally { btn.disabled = false; btn.textContent = 'Share'; }
+}
+
+/* =========================================================
+   EXPLORE / SEARCH
+   ========================================================= */
+async function loadExplore() {
+  const [trending, suggested] = await Promise.all([
+    api('/api/explore/posts').catch(() => []),
+    api('/api/explore/users').catch(() => []),
+  ]);
+  document.getElementById('explore-grid').innerHTML = trending.length
+    ? trending.map(p => `
+        <button onclick="openThread(${p.user.id}, '${p.user.username}', '${p.user.avatarUrl || ''}')" class="relative block">
+          <img src="${p.mediaUrl}" class="w-full aspect-square object-cover">
+          <span class="absolute bottom-1 left-1 flex items-center gap-1 text-[11px] text-white bg-black/50 rounded-full px-1.5 py-0.5"><i data-lucide="heart" class="w-3 h-3" style="fill:#fff"></i>${p.likes}</span>
+        </button>`).join('')
+    : `<p class="col-span-3 text-center text-sm text-mute-t py-8" style="color:#8A8FA3">Nothing trending yet — check back soon.</p>`;
+
+  document.getElementById('suggested-users').innerHTML = suggested.length
+    ? suggested.map(u => `
+        <div class="flex flex-col items-center gap-1.5 shrink-0 w-20 text-center">
+          <img src="${u.avatarUrl || fallbackAvatar()}" class="w-14 h-14 rounded-full object-cover bg-white/10">
+          <span class="text-xs font-medium truncate w-20">${u.username}</span>
+          <button id="follow-btn-${u.id}" onclick="followUser(${u.id})" class="text-[11px] px-2.5 py-1 rounded-full font-medium text-white" style="background:linear-gradient(135deg,#FF2E7E,#00E8FF);">Follow</button>
+        </div>`).join('')
+    : `<p class="text-sm text-mute-t" style="color:#8A8FA3">No suggestions yet.</p>`;
+  lucide.createIcons();
+}
+
+async function followUser(id) {
+  const btn = document.getElementById('follow-btn-' + id);
+  try {
+    await api(`/api/follow/${id}`, { method: 'POST' });
+    btn.textContent = 'Following';
+    btn.style.background = '#262A38';
+    btn.disabled = true;
+  } catch (err) { alert(err.message); }
+}
+
+let searchDebounce;
+function searchUsers(q) {
+  clearTimeout(searchDebounce);
+  const emptyState = document.getElementById('explore-search-empty');
+  const grid = document.getElementById('explore-grid');
+  searchDebounce = setTimeout(async () => {
+    const box = document.getElementById('explore-results');
+    if (!q.trim()) {
+      box.innerHTML = ''; emptyState.classList.remove('hidden'); grid.classList.remove('hidden');
+      return;
+    }
+    emptyState.classList.add('hidden'); grid.classList.add('hidden');
+    try {
+      const results = await api(`/api/users/search?q=${encodeURIComponent(q)}`);
+      box.innerHTML = results.length ? results.map(u => `
+        <button class="w-full flex items-center gap-3 py-2.5 text-left" onclick="openThread(${u.id}, '${u.username}', '${u.avatarUrl || ''}')">
+          <img src="${u.avatarUrl || fallbackAvatar()}" class="w-10 h-10 rounded-full object-cover bg-white/10">
+          <span class="text-sm font-medium">${u.username}</span>
+        </button>`).join('') : `<p class="text-sm text-mute-t py-4" style="color:#8A8FA3">No users found.</p>`;
+    } catch {}
+  }, 250);
+}
+
+/* =========================================================
+   ACTIVITY / NOTIFICATIONS
+   ========================================================= */
+async function loadNotifications() {
+  let items = [];
+  try { items = await api('/api/notifications'); } catch {}
+  document.getElementById('activity-badge').classList.add('hidden');
+  api('/api/notifications/read', { method: 'POST' }).catch(() => {});
+  const list = document.getElementById('activity-list');
+  list.innerHTML = items.length ? items.map(n => `
+    <div class="flex items-center gap-3 px-4 py-3 ${n.read ? '' : 'bg-white/[0.03]'}">
+      <img src="${n.actor.avatarUrl || fallbackAvatar()}" class="w-10 h-10 rounded-full object-cover bg-white/10">
+      <p class="text-sm flex-1"><span class="font-medium">${n.actor.username}</span> ${n.type === 'like' ? 'liked your post' : 'started following you'} <span class="text-mute-t" style="color:#8A8FA3">· ${timeAgo(n.createdAt)}</span></p>
+      ${n.postThumb ? `<img src="${n.postThumb}" class="w-10 h-10 object-cover rounded-md">` : ''}
+    </div>`).join('') : `<p class="text-center text-sm text-mute-t py-10" style="color:#8A8FA3">No activity yet.</p>`;
+}
+
+/* =========================================================
+   DMs
+   ========================================================= */
+async function loadConversations() {
+  let convos = [];
+  try { convos = await api('/api/conversations'); } catch {}
+  const list = document.getElementById('dm-list');
+  list.innerHTML = convos.length ? convos.map(c => `
+    <button onclick="openThread(${c.userId}, '${c.username}', '${c.avatarUrl || ''}')" class="w-full flex items-center gap-3 px-4 py-3 text-left active:bg-white/5">
+      <img src="${c.avatarUrl || fallbackAvatar()}" class="w-12 h-12 rounded-full object-cover bg-white/10">
+      <div class="flex-1 min-w-0"><p class="text-sm font-medium">${c.username}</p><p class="text-xs text-mute-t truncate" style="color:#8A8FA3">${c.lastMessage || ''}</p></div>
+      <span class="text-xs text-mute-t" style="color:#8A8FA3">${timeAgo(c.lastAt)}</span>
+    </button>`).join('') : `<p class="text-center text-sm text-mute-t py-10" style="color:#8A8FA3">No conversations yet — search a username above to start one.</p>`;
+}
+let searchDmDebounce;
+function searchUsersForDm(q) {
+  clearTimeout(searchDmDebounce);
+  searchDmDebounce = setTimeout(async () => {
+    const box = document.getElementById('dm-search-results');
+    if (!q.trim()) { box.innerHTML = ''; return; }
+    try {
+      const results = await api(`/api/users/search?q=${encodeURIComponent(q)}`);
+      box.innerHTML = results.map(u => `
+        <button class="w-full flex items-center gap-3 py-2 text-left" onclick="openThread(${u.id}, '${u.username}', '${u.avatarUrl || ''}')">
+          <img src="${u.avatarUrl || fallbackAvatar()}" class="w-8 h-8 rounded-full object-cover bg-white/10">
+          <span class="text-sm">${u.username}</span>
+        </button>`).join('');
+    } catch {}
+  }, 250);
+}
+
+let activeChatUserId = null;
+async function openThread(userId, username, avatarUrl) {
+  activeChatUserId = userId;
+  document.getElementById('thread-avatar').src = avatarUrl || fallbackAvatar();
+  document.getElementById('thread-name').textContent = username;
+  document.getElementById('dm-search').value = '';
+  document.getElementById('dm-search-results').innerHTML = '';
+  await renderThreadMessages();
+  showScreen('dm-thread');
+}
+async function renderThreadMessages() {
+  let msgs = [];
+  try { msgs = await api(`/api/messages/${activeChatUserId}`); } catch {}
+  document.getElementById('thread-messages').innerHTML = msgs.map(m => `
+    <div class="flex ${m.from === 'me' ? 'justify-end' : 'justify-start'}">
+      <div class="max-w-[72%] px-3.5 py-2 rounded-2xl text-sm" style="${m.from === 'me' ? 'background:linear-gradient(135deg,#FF2E7E,#7A2EFF); color:#fff;' : 'background:#1C1F2B;'}">${m.body}</div>
+    </div>`).join('');
+}
+async function sendMessage() {
+  const input = document.getElementById('thread-input');
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = '';
+  try { await api(`/api/messages/${activeChatUserId}`, { method: 'POST', body: JSON.stringify({ body: text }) }); await renderThreadMessages(); }
+  catch (err) { alert(err.message); }
+}
+
+/* =========================================================
+   PROFILE
+   ========================================================= */
+async function loadMe() {
+  try {
+    const me = await api('/api/me');
+    currentUser = me;
+    document.getElementById('profile-handle').textContent = '@' + me.username;
+    document.getElementById('profile-username-line').textContent = me.username;
+    document.getElementById('profile-bio').textContent = me.bio || 'No bio yet.';
+    document.getElementById('stat-posts').textContent = me.posts;
+    document.getElementById('stat-followers').textContent = me.followers;
+    document.getElementById('stat-following').textContent = me.following;
+    document.getElementById('profile-avatar').src = me.avatarFileId ? me.avatarUrl : fallbackAvatar();
+    document.getElementById('nav-avatar').src = me.avatarUrl || fallbackAvatar();
+    document.getElementById('profile-grid').innerHTML = posts.filter(p => p.user.username === me.username).map(p => `<img src="${p.mediaUrl}" class="w-full aspect-square object-cover">`).join('');
+  } catch (err) { console.error(err); }
+}
+
+/* =========================================================
+   SETTINGS
+   ========================================================= */
+function openSettings() { document.getElementById('scrim-settings').classList.add('open'); document.getElementById('settings-drawer').classList.add('open'); }
+function closeSettings() { document.getElementById('scrim-settings').classList.remove('open'); document.getElementById('settings-drawer').classList.remove('open'); }
+function toggleTheme() {
+  document.documentElement.classList.toggle('light');
+  const dark = !document.documentElement.classList.contains('light');
+  document.getElementById('theme-switch').style.background = dark ? '#FF2E7E' : '#33384A';
+  document.getElementById('theme-knob').style.transform = dark ? 'translateX(0)' : 'translateX(20px)';
+}
+function setBrightness(v) { document.documentElement.style.setProperty('--brightness', v + '%'); document.getElementById('brightness-val').textContent = v + '%'; }
+function toggleRow(btn) {
+  const toggle = btn.querySelector('.row-toggle'); const knob = btn.querySelector('.row-knob');
+  const on = toggle.style.background === 'rgb(255, 46, 126)';
+  toggle.style.background = on ? '#33384A' : '#FF2E7E';
+  knob.style.transform = on ? 'translateX(0)' : 'translateX(22px)';
+}
+/* =========================================================
+   UTIL
+   ========================================================= */
+function fallbackAvatar() { return 'https://api.dicebear.com/7.x/thumbs/svg?seed=' + Math.random(); }
+function timeAgo(iso) {
+  if (!iso) return '';
+  const s = Math.floor((Date.now() - new Date(iso)) / 1000);
+  if (s < 60) return 'now';
+  if (s < 3600) return Math.floor(s / 60) + 'm';
+  if (s < 86400) return Math.floor(s / 3600) + 'h';
+  return Math.floor(s / 86400) + 'd';
+}
+
+document.querySelectorAll('.settings-row').forEach(b => b.classList.add('w-full', 'flex', 'items-center', 'gap-3', 'py-2.5', 'text-sm'));
+switchAuthTab('login');
+tryResumeSession();
+</script>
+</body>
+</html>
